@@ -4,7 +4,12 @@ set_option linter.unusedVariables false
 
 /-! # Exercises for Chapter 5  (`TacticM`)
 
-Worked answers: `Solutions/C5.lean`. -/
+These drill writing real tactics: the `MetaM`-core / `TacticM`-shell split, and the
+`MVarId` primitives (`constructor`, `apply`, `clear`) that assign the goal.  E1 to
+E5 re-implement tactics you use daily; E6 is a stretch.
+
+Write each answer below its prompt, run it, then compare with `Solutions/C5.lean`.
+This file is all comments as shipped, so it builds; fill it in as you go. -/
 
 -- E1.  Write `my_trivial` as a MACRO: try `rfl`, else `assumption`.  (One line.)
 

@@ -4,8 +4,13 @@ set_option linter.unusedVariables false
 
 /-! # Exercises for Chapter 0  (the functional Lean of §0.4)
 
-Write your answers below the prompts, then check `Solutions/C0.lean`.
-As shipped this file is all comments, so it compiles; fill it in as you go. -/
+These warm-ups drill the small slice of functional Lean the whole tutorial rests
+on: functions, pattern matching, `Option`, and a first `MetaM` computation.  If
+these feel comfortable, the later chapters will too.
+
+HOW TO WORK THESE: write each answer below its prompt, run it (watch the Infoview),
+and only then compare with the answer key in `Solutions/C0.lean`.  As shipped this
+file is all comments, so it builds; fill it in as you go. -/
 
 -- W1.  Write `thrice : Nat → Nat` returning `n + n + n`, and `#eval thrice 4` (expect 12).
 

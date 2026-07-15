@@ -5,9 +5,14 @@ set_option linter.unusedVariables false
 
 /-! # Exercises for Chapter 6  (capstone `mytauto`)
 
-Worked answers: `Solutions/C6.lean`.  These extend `MyTauto.core`; you may reuse
-its helpers `assumptionCore` and `findDestructible?`, and the `succeeds` /
-`orElseRestore` combinators from Chapter 5 (all in scope via the imports above). -/
+The hardest, most rewarding set: you extend the prover itself.  ✎6 makes it
+classical (so `p ∨ ¬p` goes through), ✎7 lets it prove forced `∃` goals, and ✎8 is
+a reading exercise against Lean's real `assumption`.
+
+Worked answers: `Solutions/C6.lean` (✎6 and ✎7 are fully implemented there).  These
+extend `MyTauto.core`; you may reuse its helpers `assumptionCore` and
+`findDestructible?`, and the `succeeds` / `orElseRestore` combinators from Chapter 5
+(all in scope via the imports above). -/
 
 -- ✎6  (the real one).  Make the prover CLASSICAL, so that `p ∨ ¬p` goes through.
 --     Hint: `Classical.byContradiction : ¬¬a → a`.  As a last resort, when nothing

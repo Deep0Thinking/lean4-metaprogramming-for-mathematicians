@@ -4,7 +4,11 @@ set_option linter.unusedVariables false
 
 /-! # Exercises for Chapter 2  (`MetaM`)
 
-Worked answers: `Solutions/C2.lean`. -/
+These drill working on a goal-as-metavariable: reading a goal's target and
+hypotheses inside its context, and the `instantiateMVars` reflex (Trap #8).
+
+Write each answer below its prompt, run it, then compare with `Solutions/C2.lean`.
+This file is all comments as shipped, so it builds; fill it in as you go. -/
 
 -- E1.  Write `goalHead? : MVarId → MetaM Name` returning the head symbol of the
 --      goal's target (hint: `(← goal.getType).getAppFnArgs.1`).

@@ -5,7 +5,11 @@ set_option linter.unusedVariables false
 
 /-! # Exercises for Chapter 1  (`Name` and `Expr`)
 
-Worked answers: `Solutions/C1.lean`. -/
+These drill the core skill of the chapter: building `Expr`s by hand (with the
+binder-safe open/close idiom) and taking them apart with `getAppFnArgs` / `.eq?`.
+
+Write each answer below its prompt, run it, then compare with `Solutions/C1.lean`.
+This file is all comments as shipped, so it builds; fill it in as you go. -/
 
 -- E1.  Build the identity function on `Bool` as a raw `Expr`
 --      (`.lam` + `.bvar 0`, cf. §1.3) and `logInfo` both it and `← inferType` of it.

@@ -4,7 +4,11 @@ set_option linter.unusedVariables false
 
 /-! # Exercises for Chapter 4  (Elaboration)
 
-Worked answers: `Solutions/C4.lean`. -/
+These drill writing elaborators, term and command, that run code at elaboration
+time to build an `Expr` directly (something a macro cannot do).
+
+Write each answer below its prompt, run it, then compare with `Solutions/C4.lean`.
+This file is all comments as shipped, so it builds; fill it in as you go. -/
 
 -- E1.  Write a term elaborator `double%` so that `double% n` elaborates directly to
 --      the literal `2 * n` (hint: `elab "double% " n:num : term => return mkNatLit ...`).

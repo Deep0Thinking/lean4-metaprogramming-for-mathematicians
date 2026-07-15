@@ -5,7 +5,11 @@ set_option linter.unusedVariables false
 
 /-! # Exercises for Chapter 3  (`Syntax`)
 
-Worked answers: `Solutions/C3.lean`. -/
+These drill the front end: writing macros (`Syntax → Syntax`), building syntax
+with quotations, and extending a syntactic category with your own notation.
+
+Write each answer below its prompt, run it, then compare with `Solutions/C3.lean`.
+This file is all comments as shipped, so it builds; fill it in as you go. -/
 
 -- E1.  Write a macro `triv2` that expands to `trivial`.  Prove `example : True := by triv2`.
 
