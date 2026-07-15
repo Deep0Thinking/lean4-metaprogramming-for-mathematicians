@@ -172,7 +172,7 @@ elab_rules : tactic
 
 end MyTauto
 
-/-! ### §6.1 (tests first)  It really proves things
+/-! ### §6.1  Tests: it really proves things
 
 Each `example` below is a genuine theorem `mytauto` closes on its own, exercising a
 different part of the search. -/
