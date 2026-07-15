@@ -230,7 +230,7 @@ stands alone: it comes with implicit arguments, universe levels, and typeclass
 instances that must be filled in.  `Nat.add 2 3` as an `Expr` is fine, but
 `@Eq Nat 1 1` already needs the implicit type argument, and `@HAdd.hAdd ...` needs
 an instance.  The `mk...` helpers do all of that bookkeeping for you.  The one
-worth naming now (you meet it in §6 and §C):
+worth naming now (you meet it in Chapter 6 and the §A cheat sheet):
 
 `mkConstWithFreshMVarLevels ``c` builds the constant `c` with *fresh universe-level
 metavariables* filled in, so later unification can solve them.  Reach for it
