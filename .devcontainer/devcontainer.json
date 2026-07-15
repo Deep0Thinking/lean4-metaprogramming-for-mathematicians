@@ -1,0 +1,13 @@
+{
+  "name": "Lean 4 Metaprogramming Tutorial",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "postCreateCommand": "curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y --default-toolchain $(cat lean-toolchain) && ~/.elan/bin/lake build || true",
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/home/vscode/.elan/bin:/root/.elan/bin"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["leanprover.lean4"]
+    }
+  }
+}

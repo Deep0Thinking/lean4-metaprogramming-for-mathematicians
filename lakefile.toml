@@ -1,0 +1,5 @@
+name = "LeanMeta"
+defaultTargets = ["LeanMeta"]
+
+[[lean_lib]]
+name = "LeanMeta"
