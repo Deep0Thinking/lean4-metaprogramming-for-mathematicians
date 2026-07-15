@@ -20,7 +20,7 @@ example (p q : Prop) (hp : p) (hq : q) : p ∧ q := by
 -- E3.  Build a piece of syntax from another via an antiquotation.
 #eval show CoreM Unit from do
   let t ← `(True)
-  logInfo m!"{(← `($t ∧ $t)).raw}"     -- True ∧ True
+  logInfo m!"{(← `($t ∧ $t)).raw}"     -- True✝ ∧ True✝   (✝ = hygiene marks on the quoted `True`, §3.4)
 
 -- E4.  Extend the `arith` DSL (Chapter 3) with subtraction, mirroring `+`.
 syntax:65 arith:65 " - " arith:66 : arith
