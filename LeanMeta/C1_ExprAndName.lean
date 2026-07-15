@@ -6,6 +6,14 @@ Part of **Lean 4 Metaprogramming for Mathematicians**.  Read the chapters in
 order (C0…C7).  Cross-references like "§5.2" use the section numbers that run
 through the whole tutorial: §N lives in Chapter N.  Each chapter has matching
 files in `Exercises/` and `Solutions/`.
+
+Chapter 0 ended on a slogan: *a tactic builds an `Expr` whose type is the goal.*
+This chapter answers the obvious next question: what *is* an `Expr`?  It is the
+single datatype in which Lean stores every term, every type, and every proof.
+Manipulating proofs means reading and building `Expr`s, so this is the core
+vocabulary of the whole subject.  We also meet `Name` (how constants are referred
+to) and the three operations you will use in every tactic: `inferType`, `whnf`,
+and `isDefEq`.
 -/
 open Lean Meta Elab Tactic
 set_option linter.unusedVariables false
@@ -17,19 +25,29 @@ set_option linter.unusedVariables false
 
 §1.1  Names
 -----------
-`Name` is a list of components: `Nat.succ` is `Name.str (Name.str .anonymous "Nat") "succ"`.
-There are two quotation forms, and the difference matters:
+Why this exists: a tactic constantly needs to *refer to declared constants*, a
+theorem like `Nat.add_comm`, a constructor like `Or.inl`, a definition like
+`Nat.add`.  Lean identifies each by a `Name`, which is a *list* of components
+rather than a flat string (`Nat.succ` is `"succ"` under `"Nat"`, over the empty
+root `.anonymous`).  It is structured this way because Lean constantly appends
+namespaces, strips prefixes, and tests prefix containment: exact on a component
+list, but error-prone when slicing a string at its dots.
 
-    `foo.bar     -- ONE backtick: a raw Name literal.  Not checked.  Might not exist.
-    ``Nat.succ   -- TWO backticks: resolved and CHECKED at compile time,
-                 --                and expanded to the full name.
+There are two ways to write a `Name` literal, and the difference is exactly the
+difference between an unchecked citation and a validated cross-reference:
 
-⚑ TRAP #3: always prefer two backticks when you mean an existing constant.  With
-one backtick, a typo (`` `Nat.suc ``) silently produces a name that resolves to
-nothing, and your tactic mysteriously never fires.
+    `foo.bar     -- ONE backtick: a raw Name literal.  NOT checked.  Might not exist.
+    ``Nat.succ   -- TWO backticks: resolved and CHECKED at compile time, and
+                 --                expanded to the fully-qualified name.
+
+⚑ TRAP #3: prefer two backticks whenever you mean an existing constant.  With one
+backtick a typo like `` `Nat.suc `` silently produces a `Name` that resolves to
+nothing; your tactic then looks for a constant that is not there and mysteriously
+never fires, with no error to tell you why.  Two backticks turn that typo into a
+compile-time error at the point you wrote it.
 
 (In `#eval`, a `Name` prints back with a leading backtick, e.g. `` `Nat.succ ``.
-That backtick is just how `Name` displays; it is not part of the name.)
+That backtick is only how a `Name` displays; it is not part of the name.)
 -/
 
 #eval `foo.bar               -- `foo.bar         (no check performed)
@@ -38,8 +56,26 @@ That backtick is just how `Name` displays; it is not part of the name.)
 
 /-! ### §1.2  `Expr`, the core language
 
-Everything Lean *means* (every term, every type, every proof) is an `Expr`.
-Look at the real definition (put your cursor on the next line): -/
+Here is the idea that makes one datatype enough for everything.  In Lean's
+foundations (dependent type theory) there is no wall between "terms", "types", and
+"proofs":
+
+  * a *type* is itself a term (`Nat` is a value, of type `Type`; `Type` is a value,
+    of type `Type 1`; and so on up a hierarchy);
+  * a *proof* is a term too, namely a term whose type is a proposition (this is the
+    Curry-Howard slogan from Chapter 0: a proof of `P` is a value of type `P`).
+
+So the natural number `2 + 2`, the type `Nat`, the proposition `∀ n, n + 0 = n`,
+and a proof of it are all the *same kind of object*, and Lean stores them all in
+one datatype, `Expr`.  Learn `Expr` and you have learned the entire language every
+proof is written in.  You can see the "types and proofs are values" claim directly
+(put your cursor on each line): -/
+
+#check Nat            -- Nat : Type       a type is a value, here of type `Type`
+#check Type           -- Type : Type 1    and `Type` is itself a value, one level up
+#check (rfl : 1 = 1)  -- rfl : 1 = 1      a proof is a value whose type is the proposition
+
+/-! Now look at the real definition of `Expr`: -/
 
 #print Lean.Expr
 
@@ -59,16 +95,45 @@ The twelve constructors, in plain words:
     .mdata  d e         -- metadata attached to e; semantically invisible
     .proj   S i e       -- projection: the i-th field of structure S out of e
 
-⚑ TRAP #4: `p → q` is NOT a separate constructor.  It is `.forallE _ p q _` with
-a body that ignores the binder.  Likewise `¬p` is not a constructor: it is the
-constant `Not` applied to `p` (and it *unfolds* to `p → False`).
+Twelve looks like a lot, but they fall into four small groups:
 
-⚑ TRAP #5: application is unary.  `f a b` is `.app (.app f a) b`.  Use
-`Expr.getAppFn` / `getAppArgs` / `getAppFnArgs` instead of peeling by hand.
+  * the three kinds of VARIABLE: `.bvar` (bound, see §1.3), `.fvar` (a free
+    variable, which for us always means a hypothesis in the goal), `.mvar` (a hole
+    still to be filled; a goal is one of these, see §2);
+  * the ATOMS: `.const` (a named constant with its universe arguments), `.sort` (a
+    universe such as `Prop` or `Type`), `.lit` (a numeric or string literal);
+  * the LAMBDA-CALCULUS core, which is where all the structure lives: `.app` (apply
+    a function to an argument) plus the two binders `.lam` (build a function
+    `fun x => ...`) and `.forallE` (form a function type, which is *also* how `→`
+    and `∀` are stored);
+  * the RARELY-hand-built rest: `.letE`, `.mdata` (annotations the kernel ignores),
+    `.proj` (project a field out of a structure value).
 
-Let us make the tree visible.  This function is your microscope.  It is a plain
-recursive function that matches on each constructor (see §0.4(c)); read it as a
-catalogue of the twelve cases. -/
+About `.sort` and universe levels: to avoid Russell's paradox Lean does not have
+`Type : Type`; instead `Prop = Sort 0`, `Type = Sort 1`, `Type 1 = Sort 2`, and so
+on up a hierarchy of *universe levels*.  You rarely touch levels by hand, and the
+`mkConstWithFreshMVarLevels` helper in §1.4 handles them for you; for now just know
+that the `us` in `.const n us` and the `u` in `.sort u` are these levels.
+
+Three traps live in this list, and each has bitten everyone:
+
+⚑ TRAP #4: `p → q` is NOT a separate constructor.  An implication is a *degenerate*
+`∀`: it is `.forallE _ p q _` whose body ignores the bound variable.  Likewise
+`¬p` is not a constructor: it is the constant `Not` applied to `p` (and `Not p`
+unfolds to `p → False`).  So when you look for an implication, you look for a
+`.forallE`.
+
+⚑ TRAP #5: application is UNARY.  `f a b` is not one node with two arguments; it is
+`.app (.app f a) b`, a left-leaning spine.  Never peel it apart by hand; use
+`Expr.getAppFn` / `getAppArgs` / `getAppFnArgs` (§1.5), which recover the head and
+the whole argument list in one step.
+
+One framing before we look inside: an `Expr` is an *abstract syntax tree*.  Just as
+`2 + 3 * 4` is really the tree with `+` at the root and children `2` and `3 * 4`
+(not a flat string), every `Expr` is a tree whose node kinds are exactly the twelve
+constructors above.  The function below is your microscope: a plain recursive
+function (the definition-by-cases from §0.4(c)) that walks that tree and names each
+node.  Read it as a catalogue, then run it on real terms in §1.3. -/
 
 /-- A crude structural printer for `Expr`.  Universe levels are elided. -/
 def describeExpr : Expr → String
@@ -86,11 +151,33 @@ def describeExpr : Expr → String
   | .mdata _ e        => s!"mdata ({describeExpr e})"
   | .proj S i e       => s!"proj {S} {i} ({describeExpr e})"
 
-/-! ### §1.3  de Bruijn indices
+/-! ### §1.3  de Bruijn indices: why bound variables have no names
 
-Bound variables carry no names, only *indices*: `.bvar 0` means "the variable
-bound by the nearest enclosing binder", `.bvar 1` the next one out, and so on.
-The `Name` stored in `.lam`/`.forallE` is a *display hint only*. -/
+This is the single most alien piece of `Expr`, so here is the reason it is built
+this way.  Consider `fun x => x` and `fun y => y`.  As functions they are *the
+same*; the choice of letter is meaningless (this is alpha-equivalence).  If Lean
+stored the letter, it would have to compare terms "up to renaming" everywhere, and
+substituting one term into another could accidentally *capture* a variable (a free
+`y` sliding under a binder that also uses `y`).  Both problems are classic and
+fiddly.
+
+The fix, due to de Bruijn, is to give bound variables no names at all, only a
+*number*: `.bvar i` means "the variable bound by the `i`-th enclosing binder,
+counting outward from 0".  Now the *bodies* of `fun x => x` and `fun y => y` are
+the identical tree `.bvar 0`.  The one thing still distinguishing the two terms is
+the display-only `Name` label kept in `.lam`, and Lean's equality test `==` (with
+its hashing) deliberately ignores that label, so the two count as equal; and
+substitution can no longer capture.  See it: -/
+
+#eval (Expr.lam `x (.const ``Nat []) (.bvar 0) .default) ==
+      (Expr.lam `y (.const ``Nat []) (.bvar 0) .default)   -- true: `==` ignores the binder name
+
+/-! That retained name exists only so the pretty-printer can show `fun x =>` rather
+than `fun #0 =>`; it carries no logical meaning.
+
+Analogy: instead of naming the variable of an integral you refer to "the variable
+of the innermost integral" (∫f(x)dx and ∫f(y)dy are the same integral).  `.bvar 0`
+is the innermost binder, `.bvar 1` the next one out.  Watch it happen: -/
 
 #eval show MetaM Unit from do
   -- fun (x : Nat) => x     : the body is `.bvar 0`, i.e. "the nearest binder"
@@ -106,22 +193,23 @@ The `Name` stored in `.lam`/`.forallE` is a *display hint only*. -/
   logInfo (describeExpr konst)              -- lam x : ... => (lam y : ... => (bvar 1))
 
 /-
-⚑ TRAP #6: THE classic beginner bug.  A `.bvar` that is not underneath its
-binder is a *loose* bound variable, and it is nonsense.  You must never build an
-`Expr` by taking the body of a `.lam` and using it on its own.
+⚑ TRAP #6: THE classic beginner bug.  A `.bvar i` only means something *underneath*
+its binder.  If you grab the body of a `.lam` and use it on its own, its `.bvar`s
+now point at binders that are not there; this is a *loose* bound variable, and it
+is nonsense that will crash the kernel or produce gibberish.
 
-The cure, and the idiom you will use forever: never touch `.bvar` yourself.
-Instead, open the binder into a fresh *free* variable, work with that, and close
-it again.  In `MetaM`:
+The cure, and the single idiom you will use forever, is to never touch `.bvar`
+yourself.  Instead, *open* the binder into a fresh named free variable, do your
+work with that honest variable, then *close* it back up.  In `MetaM`:
 
-    withLocalDeclD name type  fun x => ...   -- open: gives you a free variable `x`
-    mkLambdaFVars #[x] body                  -- close: abstracts `x` back to a bvar
+    withLocalDeclD name type  fun x => ...   -- OPEN: gives you a free variable `x`
+    mkLambdaFVars #[x] body                  -- CLOSE: abstracts `x` back into a bvar
 
-This open / work / close idiom is how you safely operate under a binder.  (To open
-*several* nested binders at once you will later reach for `lambdaTelescope` /
-`forallTelescope`; a *telescope* is the whole chain of binders; see the §D
-glossary.)  Watch, and note that `x` here is an honest `Expr` (a free variable)
-you can pass around, with no index arithmetic: -/
+Between the two, `x` is an ordinary `Expr` (a free variable) you can pass around
+and apply, with no index arithmetic anywhere.  (To open *several* nested binders at
+once you will later reach for `lambdaTelescope` / `forallTelescope`; a *telescope*
+is the whole chain of binders, see the §D glossary.)  Here we build `fun x => x + 1`
+without ever writing a `.bvar`: -/
 
 #eval show MetaM Unit from do
   let e ← withLocalDeclD `x (.const ``Nat []) fun x => do
@@ -135,16 +223,19 @@ you can pass around, with no index arithmetic: -/
 `Nat.add` rather than the `+` notation, and the pretty-printer echoes that.  They
 are the same function; only the display differs.
 
-### §1.4  Building expressions
+### §1.4  Building expressions, and the three workhorses
 
-Prefer these helpers over raw constructors; they insert implicit arguments,
-universe levels and instances for you.
+Why not just use the raw constructors?  Because a real constant almost never
+stands alone: it comes with implicit arguments, universe levels, and typeclass
+instances that must be filled in.  `Nat.add 2 3` as an `Expr` is fine, but
+`@Eq Nat 1 1` already needs the implicit type argument, and `@HAdd.hAdd ...` needs
+an instance.  The `mk...` helpers do all of that bookkeeping for you.  The one
+worth naming now (you meet it in §6 and §C):
 
-One builder you will meet in §6 and §C deserves a word now:
-`mkConstWithFreshMVarLevels ``c` makes the constant `c` with *fresh universe-level
-metavariables* filled in, so that later unification can solve them.  Reach for it
+`mkConstWithFreshMVarLevels ``c` builds the constant `c` with *fresh universe-level
+metavariables* filled in, so later unification can solve them.  Reach for it
 instead of `.const ``c []` whenever `c` might be universe-polymorphic (e.g.
-`False.elim : {C : Sort u} → False → C`, or `Exists.intro`) where the empty level
+`False.elim : {C : Sort u} → False → C`, or `Exists.intro`), where the empty level
 list `[]` would be wrong.  It is simply the safe, general form of "name the
 constant `c`". -/
 
@@ -158,34 +249,90 @@ constant `c`". -/
   logInfo m!"2+3 =?= 6    : {← isDefEq e (mkNatLit 6)}"  -- false
 
 /-
-The three `MetaM` workhorses you just met, and which you will use in every
-tactic you ever write:
+Three `MetaM` operations appeared there, and you will use them in every tactic you
+ever write.  Two need real intuition, so take them slowly.
 
-    inferType e      : MetaM Expr    -- the type of e
-    whnf     e       : MetaM Expr    -- weak-head normal form: unfold until the
-                                     -- HEAD symbol is a constructor/binder
-    isDefEq  a b     : MetaM Bool    -- definitional equality, up to computation
-                                     -- ⚠ may ASSIGN metavariables as a side effect
+    inferType e   : MetaM Expr    -- the type of e (recall: types are terms too)
 
-`isDefEq` is unification, not just a test.  `isDefEq ?m 5` returns `true` *and*
-assigns `?m := 5`.  This is the engine behind `apply`, `exact`, `rw`, everything.
-(On failure it rolls its own state back, so a failed `isDefEq` is harmless.)
+    whnf e        : MetaM Expr    -- "weak-head normal form": compute just enough
+                                  --   to expose the OUTERMOST symbol, no further.
 
-TRANSPARENCY.  How eagerly `whnf`/`isDefEq` unfold definitions is controlled by a
-"transparency setting":  `.reducible` (only `@[reducible]` defs) ⊂ `.instances`
-⊂ `.default` (everything except `@[irreducible]`) ⊂ `.all`.
-    whnf   e             -- ambient setting (usually `.default`)
-    whnfR  e             -- forced to `.reducible`
-    withReducible do ... -- run a block at `.reducible`
-Rule of thumb: matching on the *user's* goal shape → `.reducible`, so you do not
-accidentally see through their definitions.  Deciding whether two things are
-*really* equal → `.default`.
+    isDefEq a b   : MetaM Bool    -- are a and b DEFINITIONALLY equal?
+                                  --   ⚠ may ASSIGN metavariables as a side effect.
+
+DEFINITIONAL EQUALITY is the concept to internalize.  Two terms are *definitionally
+equal* (defeq) when they become identical after unfolding definitions and
+computing.  The example every mathematician already owns: `2 + 2` and `4` are not
+merely "provably equal"; they are the *same natural number*, because `2 + 2`
+*computes* to `4`.  That sameness is definitional equality, and Lean's typechecker
+uses it silently everywhere.  For instance this is accepted with no rewriting at
+all, because `P (2 + 2)` and `P 4` are the very same type: -/
+
+example (P : Nat → Prop) (h : P (2 + 2)) : P 4 := h   -- accepted: 2 + 2 is defeq to 4
+
+-- The sharpest contrast, worth staring at.  `Nat.add` computes by recursion on its
+-- SECOND argument, so `n + 0` reduces straight to `n` (defeq), while `0 + n` gets
+-- stuck on the variable `n` and is only PROPOSITIONALLY equal to it:
+example (n : Nat) : n + 0 = n := rfl        -- ✓ `rfl` works: the two sides are DEFEQ
+-- example (n : Nat) : 0 + n = n := rfl      -- ✗ rejected: NOT defeq (`0 + n` is stuck)
+example (n : Nat) : 0 + n = n := by simp     -- ✓ but this needs a real proof (induction)
+
+/-
+Contrast this with *propositional* equality `a = b`, which is a proposition you
+state and prove (with `rw`, `simp`, ...).  Definitional equality is stronger and
+automatic: if two things are defeq, you may use one where the other is expected,
+for free.  `rfl` proves `a = b` exactly when `a` and `b` are defeq, which is why
+`example : 2 + 2 = 4 := rfl` works.
+
+`isDefEq a b` decides defeq, but it does one thing more: it is *unification*.  If
+either side contains a metavariable (a hole), `isDefEq` will try to *assign* that
+hole to make the two sides equal.  `isDefEq ?m 5` returns `true` and, as a side
+effect, sets `?m := 5`.  This is the engine underneath `apply`, `exact`, and `rw`:
+each one works by asking "can I make these defeq, filling holes as needed?".  (A
+failed `isDefEq` rolls back any assignments it tried, so failure is harmless.)
+
+`whnf` (weak-head normal form) answers a narrower question: what is the OUTERMOST
+symbol here?  To decide "is this goal an equation? a conjunction? a `∀`?" you do
+not need the term fully computed; you need only its head.  `whnf` unfolds and
+computes just until the head is rigid (a constructor, a binder, a constant that
+will not reduce), then stops.  It is the standard first move when matching on a
+goal's shape.  You can watch it see through a definition to expose a hidden head: -/
+
+/-- A user-defined abbreviation, opaque until `whnf` unfolds it. -/
+def MyConj (p q : Prop) : Prop := p ∧ q
+
+#eval show MetaM Unit from do
+  let e ← mkAppM ``MyConj #[.const ``True [], .const ``False []]
+  logInfo m!"before whnf, head = {e.getAppFn}"           -- MyConj  (opaque)
+  logInfo m!"after  whnf, head = {(← whnf e).getAppFn}"  -- And     (whnf saw through it)
+
+/-
+TRANSPARENCY controls how eagerly `whnf` and `isDefEq` unfold definitions, and it
+matters for a real reason.  Suppose a user wrote `def Positive x := x > 0`.  When
+your tactic inspects a goal `Positive n`, should it see `Positive n` or unfold to
+`n > 0`?  Usually you want to respect their abbreviation and NOT unfold.  The
+transparency setting is that dial:
+
+    `.reducible`  (only `@[reducible]` defs)  ⊂  `.instances`
+                  ⊂  `.default` (everything except `@[irreducible]`)  ⊂  `.all`
+
+    whnf   e             -- uses the ambient setting (usually `.default`)
+    whnfR  e             -- forces `.reducible`
+    withReducible do ... -- runs a whole block at `.reducible`
+
+Rule of thumb: when you match on the *user's* goal shape, work at `.reducible` so
+you do not accidentally see through their definitions.  When you need to decide
+whether two things are *really* the same, use `.default`.
 -/
 
 /-! ### §1.5  Taking expressions apart
 
-Never pattern-match a nested `.app` chain by hand.  Use `getAppFnArgs`: it splits
-`f a b c` into the head `f` and the argument array `#[a, b, c]` in one step. -/
+You now build `Expr`s; the other half of the job is reading them.  The one tool to
+reach for first is `getAppFnArgs`: because application is unary (Trap #5), a term
+like `@And p q` is really `.app (.app (.const `And) p) q`, and matching that by
+hand is miserable.  `getAppFnArgs` undoes the spine in one step, handing you the
+head constant's `Name` and the argument `Array`.  Classifying a proposition by its
+head symbol then reads like a table: -/
 
 /-- Classify a proposition by its head symbol. -/
 def analyse (e : Expr) : MetaM String := do
@@ -210,7 +357,8 @@ def analyse (e : Expr) : MetaM String := do
 elements (`#[_]` exactly one, `#[_, _, _]` exactly three); a wrong length simply
 falls through to the next branch.  That length test is exactly what separates the
 two-argument heads (`And`/`Or`/`Iff`, and `Exists` stored as `@Exists α p`) and
-the one-argument `Not` from `Eq`, which carries three (`@Eq α lhs rhs`). -/
+the one-argument `Not` from `Eq`, which carries three (`@Eq α lhs rhs`), because
+the implicit type argument counts. -/
 
 /-
 Other useful destructors (all in `Lean.Expr`, all worth Ctrl-clicking):
@@ -220,7 +368,15 @@ Other useful destructors (all in `Lean.Expr`, all worth Ctrl-clicking):
     e.arrow? e.not? e.and?
     e.fvarId!  e.mvarId!                     -- partial; only after checking
 
-The `?`-suffixed ones return `Option` (see §0.4(d)): `e.eq?` gives
-`some (α, lhs, rhs)` if `e` is an equality, else `none`.  The `!`-suffixed ones
-crash if you are wrong, so guard them with an `is...` check first.
+Two naming conventions worth learning here, because they recur across the whole
+API:
+  * a `?`-suffixed function returns an `Option` (§0.4(d)): `e.eq?` gives
+    `some (α, lhs, rhs)` if `e` is an equality and `none` otherwise, so you handle
+    the "not an equality" case honestly;
+  * a `!`-suffixed function is its reckless cousin that CRASHES if you are wrong
+    (`e.fvarId!` assumes `e` really is an `.fvar`).  Only use `!` right after an
+    `is...` check has already guaranteed the shape.
+
+That is `Expr`.  Next, Chapter 2 introduces the one variable kind we have kept
+deferring, the metavariable, and reveals that a *goal is a metavariable*.
 -/
