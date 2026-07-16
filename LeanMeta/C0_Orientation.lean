@@ -350,67 +350,108 @@ with the such-and-such structure".  It is the code version of "for any group G".
 (h)  THE BIG ONE: monads and `do`-notation
 ────────────────────────────────────────────────────────────────────────────────
 This is the one genuinely new concept, and the whole tutorial leans on it, so we
-motivate it slowly and from the problem it solves.  If you know "monad" from
-category theory, set that aside: you do NOT need any of it here.  In programming
-the word just names the pattern below.
+build it from a monad you have ALREADY met in part (d): `Option`.
 
-THE PROBLEM.  A tactic is not a pure function `input → output`.  To do its work it
-must interact with Lean's hidden state:
-  * it READS shared data: the environment (every definition in scope), the local
-    context (the current goal's hypotheses), the current metavariable assignment
-    (the partially-built proof);
-  * it MODIFIES some of that: assigning a metavariable fills in a piece of the
-    proof; introducing a hypothesis changes the context;
-  * it may FAIL (the tactic does not apply here);
-  * it may emit messages (errors, trace output).
+START WITH `Option`.  Recall `firstOfList : List Nat → Option Nat`, a partial
+function.  Suppose you want to compose it with "double the result".  You cannot
+just apply `double`, because the first step might be `none`; you must unwrap the
+`some` and pass the `none` through.  That is exactly what `doubleFirst` in (d) did
+by hand:
 
-Now imagine writing this with ordinary functions.  "Look up a constant" needs the
-environment, so it takes it as an argument.  "Assign a metavariable" changes the
-proof state, so it must take the old state and return the new one.  A tactic that
-performs ten such steps would have to thread the state through by hand:
+    match firstOfList xs with | some x => some (x + x) | none => none
 
-    -- the nightmare we are avoiding (pseudocode).  Even `inferType e` would have
-    -- to take the whole state and hand back any part it touched:
-    --     inferType : Env → LCtx → MCtx → Expr → (Expr × Env × LCtx × MCtx)
-    -- and a tactic doing several such steps would juggle the versions by hand:
-    --     let (a, s1) := step1 s0
-    --     let (b, s2) := step2 s1     -- must remember to pass s1, not s0
-    --     let (c, s3) := step3 s2     -- and s2 here, and short-circuit if any failed
-    --     ...
+Compose three such partial steps, or five, and you get a staircase of identical
+`... | none => none` boilerplate burying the one line you care about.  A monad's
+whole job is to write that boilerplate ONCE.
 
-Passing the latest state to every call, never mixing up `s1` with `s2`, and
-short-circuiting on failure, all by hand, is miserable and bug-prone, and it
-buries the actual logic.
+The operation that does it is `bind`, written `>>=`.  For `Option`, `x >>= f` is
+*defined* to be that very match:
 
-THE SOLUTION.  A **monad** is a device that does that threading for you.  We
-package "a computation that may read and modify Lean's state, may fail, may emit
-messages, and finally yields a value of type `α`" into a single type, here called
-`MetaM α`.  You build big computations from small ones with `do`, and the
-plumbing (feeding each step the latest state, aborting on failure) is automatic
-and invisible.  So:
+    x >>= f   =   match x with | some a => f a | none => none
 
-    MetaM α   =   "a recipe that, run against Lean's current internal state,
-                   produces an α (or fails), possibly updating that state."
+"if `x` has a value, feed it to `f`; if not, stay `none`".  So `bind` is what lets
+you *chain* partial computations: it feeds the value out of one step into the next
+partial function `f : α → Option β`, threading the `none` for you.  (To literally
+compose two partial functions `g` and `h`, you write `fun a => g a >>= h`.)  With it,
+`doubleFirst` becomes a one-liner, no match in sight: -/
 
-A clean way for a mathematician to picture it: think of `MetaM α` as a function
-`LeanState → (α × LeanState)` that might also throw.  `do` is the notation for
-composing such functions, feeding one's output state into the next.  You never
-write `LeanState`; the monad carries it for you.  The four layers of §0.3 are now
-demystified: `CoreM`, `MetaM`, `TermElabM`, `TacticM` are the same idea with
-progressively more state in that `LeanState`.  `Unit` is the one-element type
-(the analogue of "void"): a `MetaM Unit` is a recipe run only for its effect.
+def doubleFirst' (xs : List Nat) : Option Nat :=
+  firstOfList xs >>= fun x => some (x + x)
 
-THE MECHANICS.  Everything happens inside a `do` block.  There are exactly two
-kinds of "let", and telling them apart is the single most important skill:
+#eval doubleFirst' [10, 20]   -- some 20
+#eval doubleFirst' []         -- none   (the `none` was threaded for you)
 
-    let x ← step      -- step : MetaM α.  RUN it; bind its result x : α.        (effectful)
-    let x := value    -- value : α already.  Just name it; nothing is run.      (pure)
+/-! Two more names finish the vocabulary.  `pure a` injects a plain value as a
+trivial computation; for `Option`, `pure a = some a` (and `return` is the same).
+And `do` with `←` is just readable sugar for chains of `>>=`, by the single rule
 
-The arrow `←` (type it `\l`, or write ASCII `<-`) is the "run this computation and
-give me its result" operator.  A few more do-block forms:
+    do (let a ← x; rest)   ≡   x >>= (fun a => rest)
+
+so `let x ← firstOfList xs` reads "run `firstOfList xs`; if `some x`, bind `x` and
+continue; if `none`, the whole block is `none`".  Here is the same function a third
+time, now with neither `>>=` nor `match`: -/
+
+def doubleFirst'' (xs : List Nat) : Option Nat := do
+  let x ← firstOfList xs        -- unwraps the `some`, threads the `none`
+  pure (x + x)
+
+#eval doubleFirst'' [10, 20]  -- some 20
+
+/-! THE PATTERN, once and for all.  A *monad* is any type constructor `m` (an operation
+on types, sending `α` to a new type `m α`, just as `Option` sends `Nat` to
+`Option Nat`) equipped with
+
+    pure : α → m α                       -- inject a plain value
+    bind : m α → (α → m β) → m β          -- written `>>=`; compose two steps
+
+(obeying a couple of common-sense laws).  What changes from one monad to the next
+is the *invisible plumbing* that `bind` threads for you:
+
+    Option   threads "might be absent"          (bind short-circuits on `none`)
+    MetaM    threads "read/write Lean's state, and may fail"   (the one we need)
+    IO       threads "the outside world",   and so on.
+
+The good news: `do`, `←`, `pure`, `return` mean the SAME thing in every monad; only
+what `bind` threads underneath changes.  So once you can read a `do` block over
+`Option`, you can read one over `MetaM`.  (If you know "monad" from category theory,
+yes it is that, but you need none of the theory here.)
+
+`MetaM`, THE ONE YOU WILL USE.  A tactic is not a pure `input → output` function: to
+work it must READ Lean's hidden state (the environment of all definitions, the
+goal's hypotheses, the current metavariable assignments), MODIFY some of it
+(assigning a metavariable fills in part of the proof), and it may FAIL.  Written
+with plain functions, even `inferType e` would have to take the whole state and
+return any part it touched, and you would thread the versions by hand:
+
+    -- the nightmare a monad saves you from (pseudocode):
+    --   inferType : Env → LCtx → MCtx → Expr → (Expr × Env × LCtx × MCtx)
+    --   let (a, s1) := step1 s0
+    --   let (b, s2) := step2 s1   -- must pass s1 (not s0), and short-circuit on failure
+    --   ...
+
+`MetaM` is `Option`'s trick with a richer effect: `MetaM α` is a recipe that, run
+against Lean's current state, yields an `α` (or fails), possibly updating that
+state, and `bind` threads that state (and the failure) for you.  Concretely,
+`let a ← step` is the same `>>=` as before, except now `>>=` also hands the updated
+state (the `s1` of the pseudocode above) to the next step, exactly the plumbing you
+would otherwise thread by hand.  A clean picture: think of `MetaM α` as a function
+`LeanState → (α × LeanState)` that might throw; `do`
+composes such functions, feeding each one's output state to the next.  You never
+write `LeanState`.  This demystifies §0.3: `CoreM ⊆ MetaM ⊆ TermElabM ⊆ TacticM` are
+the same idea with progressively more state in that `LeanState`.  (`Unit` is the
+one-element type, the analogue of "void"; a `MetaM Unit` is run only for its effect.)
+
+THE MECHANICS.  Inside a `do` block there are exactly two kinds of "let", and
+telling them apart is the single most important skill:
+
+    let x ← step      -- step : m α.  RUN it (this is `bind`); x : α.       (effectful)
+    let x := value    -- value : α already.  Just name it; nothing runs.    (pure)
+
+The arrow `←` (type it `\l`, or ASCII `<-`) is "run this computation and give me its
+result".  A few more forms:
 
     step              -- run `step`, ignore its result (used for its effect)
-    return v / pure v -- the trivial recipe that just yields v (delivers the α)
+    return v / pure v -- the trivial recipe that just yields v
     (← step)          -- run `step` right here and drop in its result;
                       --   `foo (← bar)` is short for `let t ← bar; foo t`
 
@@ -428,12 +469,8 @@ Infoview; `mkAppM`, `inferType`, `whnf` are the real API you meet in Chapter 1. 
 block lives in; inside a `def` with a declared return type, or inside a tactic,
 Lean already knows, and you just write `do`.
 
-Tying back to (d): `Option` is itself a (tiny) monad.  Its "effect" is "might be
-absent", and a `do` block over `Option` short-circuits: as soon as one `←` step is
-`none`, the whole block is `none`.  That is why the `let some x := e | fallback`
-shorthand fits in a `do` block; it is the same partiality, threaded for you.  In
-one sentence: a *monad* is any type that carries some invisible plumbing (state,
-possible failure, messages, and so on) that `do` threads through your code for you.
+(The `let some x := e | fallback` shorthand promised in (d) is just this Option-`do`
+short-circuit with a custom `none` branch: if `e` is not `some ...`, run `fallback`.)
 
 The remaining `do` constructs, all of which appear later:
 
