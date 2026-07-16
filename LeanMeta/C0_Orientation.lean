@@ -499,7 +499,25 @@ A tiny loop, again in `MetaM`: -/
 `let mut total : Nat := 0`.  Without it, Lean may guess the type from a *later* use
 (for instance from a `m!"..."` message) and infer something absurd like
 `MessageData`, producing a baffling "failed to synthesize OfNat …" error pointing
-at the `:= 0`.  When a numeric `let mut` misbehaves, annotate its type first.
+at the `:= 0`.  When a numeric `let mut` misbehaves, annotate its type first. -/
+
+/-! MORE OPERATORS YOU WILL SEE.  A few shorthands built on `pure`/`bind`; each works
+in every monad, shown here on `Option`.  The most useful is `<$>` (MAP): apply a
+PLAIN function `α → β` under the wrapper, with no `do` needed.  Keep the pair
+straight, it is the distinction that matters most: use `<$>` when the continuation is
+pure (`α → β`), and `>>=` (or `let x ← `) when it is effectful (`α → m β`).  In fact
+`f <$> x` is exactly `do let a ← x; pure (f a)`. -/
+
+#eval (· + 1) <$> (some 3 : Option Nat)          -- some 4
+#eval (· + 1) <$> (none  : Option Nat)           -- none
+#eval (none : Option Nat) <|> some 4             -- some 4   (`<|>` = "try this, else that")
+#eval (some 3 : Option Nat) <|> some 4           -- some 3   (`<|>` keeps the first success)
+#eval [1, 2, 3].mapM (fun x => some (x + 1))     -- some [2, 3, 4]   (map an EFFECTFUL f, collect)
+#eval show Option Unit from [1, 2, 3].forM (fun _ => some ())  -- some ()   (like mapM, effect only)
+
+/-! In one line: `<$>`, `>>=`, and `pure` are the trio, MAP a plain function, BIND an
+effectful one, INJECT a value; `<|>` recovers from failure (the tactic `first | t | t`
+of §5 is exactly this), and `mapM` / `forM` run an effectful step over a collection.
 
 That is the whole of it.  Every tactic in this tutorial is a `do` block in one of
 the four monads.  `do` is nothing more than "run this, then that, naming results
